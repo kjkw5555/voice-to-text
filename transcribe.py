@@ -4,6 +4,8 @@ import time
 import argparse
 import subprocess
 import platform
+import socket
+import hashlib
 from whisper.utils import get_writer
 from deep_translator import GoogleTranslator
 
@@ -31,6 +33,69 @@ MODEL_MEMORY_REQUIREMENTS_GB = {
 }
 
 MODEL_ORDER = ["tiny", "base", "small", "medium", "turbo", "large"]
+
+MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+
+
+def is_internet_available(host="8.8.8.8", port=53, timeout=3):
+    """
+    インターネット接続を確認します。
+    """
+    try:
+        socket.create_connection((host, port), timeout=timeout)
+        return True
+    except (socket.timeout, socket.error):
+        return False
+
+
+def verify_model_hash(file_path, expected_sha256):
+    """
+    ファイルのSHA256ハッシュを確認します。
+    """
+    if not os.path.exists(file_path):
+        return False
+
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+
+    return sha256_hash.hexdigest() == expected_sha256
+
+
+def ensure_model_exists(model_name, download_root, skip_update=False):
+    """
+    モデルがローカルに存在するか確認し、必要に応じてダウンロードまたは更新します。
+    """
+    os.makedirs(download_root, exist_ok=True)
+
+    # whisperのモデルURLとハッシュを取得
+    from whisper import _MODELS
+    url = _MODELS.get(model_name)
+    if not url:
+        raise ValueError(f"Unknown model name: {model_name}")
+
+    # URLからハッシュを抽出（例: https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c002f23d4706596350711913917d23d922c07621453b342416f06a1/tiny.pt）
+    expected_sha256 = url.split("/")[-2] if "/" in url else None
+
+    file_path = os.path.join(download_root, f"{model_name}.pt")
+
+    exists = os.path.exists(file_path)
+
+    if exists and skip_update:
+        return file_path
+
+    # インターネットがある場合は最新チェック
+    if is_internet_available():
+        # ハッシュチェック
+        if not exists or (expected_sha256 and not verify_model_hash(file_path, expected_sha256)):
+            print(f"Downloading/Updating Whisper model '{model_name}' to {download_root}...")
+            from whisper import _download
+            _download(url, download_root, in_memory=False)
+    elif not exists:
+        raise RuntimeError(f"Model '{model_name}' not found locally and no internet connection.")
+
+    return file_path
 
 
 def bytes_to_gb(value):
@@ -191,6 +256,8 @@ def transcribe_audio(
     translation_mode=None,
     output_format="txt",
     allow_unsafe_model=False,
+    models_dir=None,
+    skip_update=False,
 ):
     """
     音声ファイルを読み込み、文字起こしを実行して結果をファイルに保存します。
@@ -201,6 +268,10 @@ def transcribe_audio(
 
     start_time = time.time()
 
+    # モデル保存先を確定
+    actual_models_dir = models_dir or MODELS_DIR
+
+    # メモリチェック（ダウングレードの可能性があるため先に計算）
     safe_model_name, memory_info, safety_message = choose_safe_model(
         model_name,
         allow_unsafe_model=allow_unsafe_model,
@@ -221,10 +292,21 @@ def transcribe_audio(
         print("Use a smaller --model or pass --allow-unsafe-model to override.")
         return
 
+    # モデルの存在確認とダウンロード/更新
+    try:
+        model_path = ensure_model_exists(
+            safe_model_name, 
+            actual_models_dir, 
+            skip_update=skip_update
+        )
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return
+
     # 1. モデルのロード
     if mode != "none":
-        print(f"Loading Whisper model '{safe_model_name}'...")
-    model = whisper.load_model(safe_model_name)
+        print(f"Loading Whisper model '{safe_model_name}' from {actual_models_dir}...")
+    model = whisper.load_model(safe_model_name, download_root=actual_models_dir)
 
     # 2. 文字起こし/翻訳の設定
     # jp2en は Whisper の translate タスクを使用
@@ -296,6 +378,8 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip memory safety downgrade and force the requested model",
     )
+    parser.add_argument("--models-dir", help=f"Directory to save Whisper models (default: {MODELS_DIR})")
+    parser.add_argument("--skip-update", action="store_true", help="Skip checking for model updates if the file exists")
     
     parser.set_defaults(mode="none", t_mode=None)
     args = parser.parse_args()
@@ -307,4 +391,6 @@ if __name__ == "__main__":
         translation_mode=args.t_mode,
         output_format=args.format,
         allow_unsafe_model=args.allow_unsafe_model,
+        models_dir=args.models_dir,
+        skip_update=args.skip_update,
     )

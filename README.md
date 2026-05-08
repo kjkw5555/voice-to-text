@@ -70,6 +70,8 @@ The translation mode is appended to the output filename (e.g. `audio_en2jp.txt`)
 | `--en2jp` | Translate English → Japanese | — |
 | `--jp2en` | Translate Japanese → English | — |
 | `--allow-unsafe-model` | Skip memory safety check and force the requested model | — |
+| `--models-dir` | Directory to save Whisper models | `./models` |
+| `--skip-update` | Skip checking for model updates if file exists | — |
 
 ## Model Memory Requirements
 

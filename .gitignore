@@ -1,5 +1,9 @@
 sample_file/
 __pycache__/
+.pytest_cache/
+.DS_Store
+models/*.pt
+名称未設定フォルダ/
 *.py[cod]
 *.egg-info/
 .venv/

@@ -7,6 +7,7 @@ Audio transcription tool powered by OpenAI Whisper, with English ↔ Japanese tr
 ## Features
 
 - Audio transcription via Whisper
+- Apple Silicon GPU backend via [mlx-whisper](https://pypi.org/project/mlx-whisper/), auto-selected when installed
 - Batch processing of a whole folder (model is loaded only once)
 - English → Japanese translation (Google Translate)
 - Japanese → English translation (Whisper translate task)
@@ -79,6 +80,7 @@ the suffix (e.g. `audio.txt`) so the result is never lost.
 
 | Option | Description | Default |
 |---|---|---|
+| `--backend` | Whisper backend (`auto` / `openai` / `mlx`). `auto` picks mlx (Apple Silicon GPU) when installed | `auto` |
 | `--model` | Whisper model (`tiny` / `base` / `small` / `medium` / `large` / `turbo`) | `base` |
 | `--format` | Output format (`txt` / `srt` / `vtt` / `tsv` / `json`) | `txt` |
 | `--full` | Show verbose log | — |
@@ -123,7 +125,12 @@ Output is saved in the same directory as the input file.
 | `deep-translator` | English → Japanese translation | ✅ |
 | `tqdm` | Progress bar display | Optional |
 | `psutil` | Memory usage detection | Optional |
+| `mlx-whisper` | Apple Silicon GPU backend (best quality/speed on M-series Macs) | Optional |
 | `ffmpeg` | Audio file decoding | ✅ (external) |
+
+The memory requirement table above applies to the `openai` backend (CPU).
+The `mlx` backend keeps fp16 weights in unified memory and needs far less RAM
+(e.g. `turbo` runs in roughly 2 GiB of available memory).
 
 ## Development
 

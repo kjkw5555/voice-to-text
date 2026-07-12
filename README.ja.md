@@ -7,6 +7,7 @@ OpenAI Whisper を使った音声文字起こしツール。英語⇔日本語�
 ## 機能
 
 - 音声ファイルの文字起こし（Whisper）
+- Apple Silicon GPU バックエンド（[mlx-whisper](https://pypi.org/project/mlx-whisper/)、インストール済みなら自動選択）
 - フォルダ指定で複数ファイルを一括処理（モデルは1回だけロード）
 - 英語 → 日本語 翻訳（Google Translate）
 - 日本語 → 英語 翻訳（Whisper の translate タスク）
@@ -79,6 +80,7 @@ python transcribe.py audio.m4a --jp2en
 
 | オプション | 説明 | デフォルト |
 |---|---|---|
+| `--backend` | バックエンド (`auto` / `openai` / `mlx`)。`auto` は mlx（Apple Silicon GPU）があれば mlx を選択 | `auto` |
 | `--model` | Whisper モデル (`tiny` / `base` / `small` / `medium` / `large` / `turbo`) | `base` |
 | `--format` | 出力形式 (`txt` / `srt` / `vtt` / `tsv` / `json`) | `txt` |
 | `--full` | 詳細ログを表示 | — |
@@ -124,7 +126,12 @@ python transcribe.py audio.m4a --jp2en
 | `deep-translator` | 英日翻訳（en2jp） | ✅ |
 | `tqdm` | プログレスバー表示 | オプション |
 | `psutil` | メモリ情報の取得 | オプション |
+| `mlx-whisper` | Apple Silicon GPU バックエンド（M系Macで最良の品質/速度） | オプション |
 | `ffmpeg` | 音声ファイルの読み込み | ✅（外部ツール） |
+
+上記のメモリ要件表は `openai` バックエンド（CPU）向けです。`mlx` バックエンドは
+fp16 の重みを unified memory に置くため必要メモリが大幅に少なく、`turbo` でも
+空きメモリ 2 GiB 程度で動作します。
 
 ## 開発
 

@@ -3,3 +3,5 @@ deep-translator
 tqdm
 psutil
 pytest
+# Apple Silicon のみ（GPUバックエンド、autoで自動選択される）:
+# mlx-whisper

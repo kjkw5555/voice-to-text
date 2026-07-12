@@ -37,8 +37,15 @@
 
 *MLX は unified memory の GPU 割当が RSS に全て乗らないため実際より小さく見える点に注意。
 
-**結論: `--backend mlx`（mlx-whisper + large-v3-turbo）を第一候補として実装する。**
-faster-whisper は速度優先オプションとして条件調整（`condition_on_previous_text=False` + `vad_filter=True` 必須）付きで検討。
+**→ `--backend` オプションとして実装済み（2026-07-12）。** `auto`（デフォルト）は
+mlx-whisper がインストールされていれば mlx を選択。モデル名→mlx-community リポジトリの
+マッピングは `MLX_MODEL_REPOS`、mlx 用の緩いメモリ要件表は `MLX_MODEL_MEMORY_REQUIREMENTS_GB`。
+faster-whisper は未実装（採用するなら `condition_on_previous_text=False` + `vad_filter=True` 必須）。
+
+実装上の注意: huggingface_hub は **import 時に** `HF_HUB_CACHE` を読むため、
+transcribe.py はモジュール読み込み時に `HF_HUB_CACHE` を `MODELS_DIR/huggingface/hub`
+に setdefault している。mlx_whisper の import 後に環境変数を設定しても効かない
+（実際にこれで内蔵ディスクへ二重ダウンロードが起きた）。
 
 追加の発見: クリーンなキーノート音声なら base でも品質は出る。過去の成果物が
 gibberish だったのは、メモリガードによる tiny への降格か、対談系のノイズの多い

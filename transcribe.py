@@ -26,6 +26,26 @@ MODEL_MEMORY_REQUIREMENTS_GB = {
 
 MODEL_ORDER = ["tiny", "base", "small", "medium", "turbo", "large"]
 
+# mlx バックエンド用。fp16 重みが unified memory に載るため CPU 版より要件が緩い。
+# 実測: turbo でピーク RSS 約0.7GB + GPU 割当（HANDOFF.md のベンチ参照）
+MLX_MODEL_MEMORY_REQUIREMENTS_GB = {
+    "tiny": {"total": 2, "available": 0.5},
+    "base": {"total": 2, "available": 0.5},
+    "small": {"total": 4, "available": 1},
+    "medium": {"total": 6, "available": 2},
+    "large": {"total": 8, "available": 4},
+    "turbo": {"total": 8, "available": 2},
+}
+
+MLX_MODEL_REPOS = {
+    "tiny": "mlx-community/whisper-tiny-mlx",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "large": "mlx-community/whisper-large-v3-mlx",
+    "turbo": "mlx-community/whisper-large-v3-turbo",
+}
+
 AUDIO_EXTENSIONS = {".mp3", ".mp4", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".webm", ".aac", ".wma", ".aiff"}
 
 # モデル保存先の優先順位: 環境変数 WHISPER_MODELS_DIR > 外付けSSD（マウント時）> ./models
@@ -36,6 +56,11 @@ MODELS_DIR = os.environ.get("WHISPER_MODELS_DIR") or (
     if os.path.isdir(EXTERNAL_MODELS_DIR)
     else os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 )
+
+# HFキャッシュ（mlx等のモデル置き場）もモデルディレクトリ配下に。
+# huggingface_hub は import 時に HF_HUB_CACHE を読むため、mlx_whisper を
+# import する前（= モジュール読み込み時）に設定しておく必要がある。
+os.environ.setdefault("HF_HUB_CACHE", os.path.join(MODELS_DIR, "huggingface", "hub"))
 
 
 def is_internet_available(host="8.8.8.8", port=53, timeout=3):
@@ -169,9 +194,9 @@ def get_memory_info():
     }
 
 
-def model_fits_memory(model_name, memory_info):
+def model_fits_memory(model_name, memory_info, requirements=MODEL_MEMORY_REQUIREMENTS_GB):
     """モデルが現在のメモリ条件に対して安全かどうかを返します。"""
-    requirement = MODEL_MEMORY_REQUIREMENTS_GB[model_name]
+    requirement = requirements[model_name]
     total_gb = memory_info["total_gb"]
     available_gb = memory_info["available_gb"]
 
@@ -184,7 +209,7 @@ def model_fits_memory(model_name, memory_info):
     return True
 
 
-def choose_safe_model(requested_model, allow_unsafe_model=False):
+def choose_safe_model(requested_model, allow_unsafe_model=False, requirements=MODEL_MEMORY_REQUIREMENTS_GB):
     """
     現在のメモリ状況に応じて安全なモデルを選びます。
     """
@@ -193,12 +218,12 @@ def choose_safe_model(requested_model, allow_unsafe_model=False):
     if allow_unsafe_model:
         return requested_model, memory_info, None
 
-    if model_fits_memory(requested_model, memory_info):
+    if model_fits_memory(requested_model, memory_info, requirements):
         return requested_model, memory_info, None
 
     requested_index = MODEL_ORDER.index(requested_model)
     for candidate in reversed(MODEL_ORDER[:requested_index]):
-        if model_fits_memory(candidate, memory_info):
+        if model_fits_memory(candidate, memory_info, requirements):
             return candidate, memory_info, (
                 f"Requested model '{requested_model}' may exceed safe memory limits. "
                 f"Falling back to '{candidate}'."
@@ -262,19 +287,53 @@ def detect_audio_language(model, file_path):
     return language_code, language_name
 
 
+def resolve_backend(backend="auto"):
+    """バックエンド指定を解決します。auto は mlx が使える環境なら mlx を選びます。"""
+    if backend != "auto":
+        return backend
+    try:
+        import mlx_whisper  # noqa: F401
+        return "mlx"
+    except ImportError:
+        return "openai"
+
+
+class MlxWhisperModel:
+    """mlx-whisper を openai-whisper のモデルと同じ形で使うためのアダプタ。"""
+
+    backend_name = "mlx"
+
+    def __init__(self, repo):
+        self.repo = repo
+
+    def transcribe(self, file_path, fp16=None, **kwargs):
+        import mlx_whisper
+        # fp16 は mlx では意味を持たないため無視。None のオプションは mlx 側の既定に任せる
+        options = {k: v for k, v in kwargs.items() if v is not None}
+        return mlx_whisper.transcribe(file_path, path_or_hf_repo=self.repo, **options)
+
+
 def load_model(
     model_name="base",
     allow_unsafe_model=False,
     models_dir=None,
     skip_update=False,
     mode="none",
+    backend="auto",
 ):
     """モデルをロードして返します。フォルダ処理時に使い回せます。"""
     actual_models_dir = models_dir or MODELS_DIR
+    resolved_backend = resolve_backend(backend)
 
+    requirements = (
+        MLX_MODEL_MEMORY_REQUIREMENTS_GB
+        if resolved_backend == "mlx"
+        else MODEL_MEMORY_REQUIREMENTS_GB
+    )
     safe_model_name, memory_info, safety_message = choose_safe_model(
         model_name,
         allow_unsafe_model=allow_unsafe_model,
+        requirements=requirements,
     )
 
     if mode != "none":
@@ -291,6 +350,17 @@ def load_model(
         print("Aborted before model load to avoid system instability.")
         print("Use a smaller --model or pass --allow-unsafe-model to override.")
         return None, None
+
+    if resolved_backend == "mlx":
+        try:
+            import mlx_whisper  # noqa: F401
+        except ImportError:
+            print("Error: --backend mlx requires mlx-whisper (pip install mlx-whisper).")
+            return None, None
+        repo = MLX_MODEL_REPOS[safe_model_name]
+        if mode != "none":
+            print(f"Using mlx-whisper model '{repo}'...")
+        return MlxWhisperModel(repo), safe_model_name
 
     try:
         model_path = ensure_model_exists(safe_model_name, actual_models_dir, skip_update=skip_update)
@@ -319,6 +389,7 @@ def transcribe_audio(
     model=None,
     item_index=1,
     item_total=1,
+    backend="auto",
 ):
     """
     音声ファイルを読み込み、文字起こしを実行して結果をファイルに保存します。
@@ -339,6 +410,7 @@ def transcribe_audio(
             models_dir=actual_models_dir,
             skip_update=skip_update,
             mode=mode,
+            backend=backend,
         )
         if model is None:
             return
@@ -349,10 +421,15 @@ def transcribe_audio(
     # jp2en は Whisper の translate タスクを使用
     task = "translate" if translation_mode == "jp2en" else "transcribe"
 
+    is_mlx = getattr(model, "backend_name", "openai") == "mlx"
+
     language_code = None
     if mode in ("bar", "full"):
-        language_code, language_name = detect_audio_language(model, file_path)
-        print(f"Detected language: {language_name}", flush=True)
+        # mlx は事前の言語検出APIを持たない。language=None のまま渡せば
+        # mlx 側が検出し、verbose が None 以外なら自身で検出言語を表示する
+        if not is_mlx:
+            language_code, language_name = detect_audio_language(model, file_path)
+            print(f"Detected language: {language_name}", flush=True)
         print(
             f"[{item_index}/{item_total}] {os.path.basename(file_path)}",
             flush=True,
@@ -418,6 +495,12 @@ def build_parser():
     group_t.add_argument("--jp2en", action="store_const", dest="t_mode", const="jp2en", help="Japanese to English")
 
     # その他
+    parser.add_argument(
+        "--backend",
+        choices=["auto", "openai", "mlx"],
+        default="auto",
+        help="Whisper backend. 'auto' uses mlx (Apple Silicon GPU) when available",
+    )
     parser.add_argument("--model", choices=["tiny", "base", "small", "medium", "large", "turbo"], default="base")
     parser.add_argument("--format", choices=["txt", "srt", "vtt", "tsv", "json"], default="txt")
     parser.add_argument(
@@ -443,6 +526,7 @@ def main(argv=None):
         allow_unsafe_model=args.allow_unsafe_model,
         models_dir=args.models_dir,
         skip_update=args.skip_update,
+        backend=args.backend,
     )
 
     if os.path.isdir(args.file):
@@ -464,6 +548,7 @@ def main(argv=None):
             models_dir=args.models_dir,
             skip_update=args.skip_update,
             mode=args.mode,
+            backend=args.backend,
         )
         if shared_model is None:
             return 1

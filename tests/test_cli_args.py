@@ -36,7 +36,8 @@ def test_transcribe_audio_uses_custom_models_dir(mock_exists, mock_load, mock_en
     transcribe_audio(
         "dummy.mp3",
         model_name="tiny",
-        models_dir=model_dir
+        models_dir=model_dir,
+        backend="openai",
     )
     # ensure_model_exists が正しいディレクトリで呼ばれたか確認
     mock_ensure.assert_called_once()

@@ -87,7 +87,7 @@ python transcribe.py audio.m4a --jp2en
 | `--en2jp` | 英語 → 日本語翻訳を実行 | — |
 | `--jp2en` | 日本語 → 英語翻訳を実行 | — |
 | `--allow-unsafe-model` | メモリ安全チェックをスキップし、指定モデルを強制使用 | — |
-| `--models-dir` | モデルの保存先ディレクトリを指定 | `./models` |
+| `--models-dir` | モデルの保存先ディレクトリを指定 | 環境変数 `WHISPER_MODELS_DIR`、なければ `./models` |
 | `--skip-update` | モデルファイルが存在する場合、更新チェックをスキップ | — |
 
 

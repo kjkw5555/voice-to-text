@@ -28,7 +28,14 @@ MODEL_ORDER = ["tiny", "base", "small", "medium", "turbo", "large"]
 
 AUDIO_EXTENSIONS = {".mp3", ".mp4", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".webm", ".aac", ".wma", ".aiff"}
 
-MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+# モデル保存先の優先順位: 環境変数 WHISPER_MODELS_DIR > 外付けSSD（マウント時）> ./models
+# 内蔵ストレージの空きが少ないため、モデルは基本的に外付けSSDに置く。
+EXTERNAL_MODELS_DIR = "/Volumes/SUNEAST_SE900SSD2T/Whispers"
+MODELS_DIR = os.environ.get("WHISPER_MODELS_DIR") or (
+    EXTERNAL_MODELS_DIR
+    if os.path.isdir(EXTERNAL_MODELS_DIR)
+    else os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+)
 
 
 def is_internet_available(host="8.8.8.8", port=53, timeout=3):

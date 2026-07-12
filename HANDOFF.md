@@ -23,18 +23,42 @@
 
 ## ロードマップ（優先順）
 
-### ① バックエンド換装【最優先】
+### ① バックエンド換装【最優先】→ プロトタイプ比較 完了（2026-07-12）
 
-openai-whisper の CPU/fp32 実行が品質の根本制約。`--backend` オプションで以下のいずれかを追加し、同じマシンで large-v3-turbo 級の品質を出す:
+実トーク音声（Code with Claude キーノート冒頭180秒、M4/16GB）で実測した結果:
 
-| 選択肢 | 特徴 |
-|---|---|
-| mlx-whisper | Apple MLX製。M4 で large-v3-turbo が実用速度。macOS専用 |
-| faster-whisper | CTranslate2製。int8 でメモリ約1/4・4〜8倍速。クロスプラットフォーム、単語タイムスタンプ対応 |
+| バックエンド | 設定 | 転写時間 | 倍速 | ピークRSS | 品質所見 |
+|---|---|---|---|---|---|
+| openai-whisper base（現状） | CPU fp32 | 8.8s | 20x | 0.78GB | クリーンな音声なら良好 |
+| faster-whisper base | CPU int8 | 5.9s | 30x | 0.95GB | base同等・固有名詞弱め（"I'm E. Forrah"） |
+| faster-whisper large-v3-turbo | CPU int8 既定 | 78s | 2.3x | 1.87GB | **幻覚の繰り返しループ発生**（既定設定の既知問題） |
+| faster-whisper large-v3-turbo | +no-condition+VAD | 27s | 6.7x | ~1.9GB | ループ解消。ただし句読点が消え気味 |
+| **mlx-whisper large-v3-turbo** | 既定 | 50s | 3.6x | 0.67GB* | **句読点・固有名詞とも最良。既定設定でクリーン** |
 
+*MLX は unified memory の GPU 割当が RSS に全て乗らないため実際より小さく見える点に注意。
+
+**結論: `--backend mlx`（mlx-whisper + large-v3-turbo）を第一候補として実装する。**
+faster-whisper は速度優先オプションとして条件調整（`condition_on_previous_text=False` + `vad_filter=True` 必須）付きで検討。
+
+追加の発見: クリーンなキーノート音声なら base でも品質は出る。過去の成果物が
+gibberish だったのは、メモリガードによる tiny への降格か、対談系のノイズの多い
+音声が原因の可能性が高い。turbo 換装は「難しい音声でも品質が落ちない」ことに価値がある。
+
+実装メモ:
 - 既存 openai-whisper はフォールバックとして残す
 - `MODEL_MEMORY_REQUIREMENTS_GB` はバックエンド別に実測で作り直す
-- **着手はプロトタイプ比較から**: 手元の音声で base（現状） vs large-v3-turbo を品質・速度・メモリで実測
+- mlx-whisper / faster-whisper は pip インストール済み。HFキャッシュは
+  `HF_HUB_CACHE=/Volumes/SUNEAST_SE900SSD2T/Whispers/huggingface/hub` を指定して使う
+- ベンチスクリプトと転写結果はセッションの scratchpad（揮発）にあり。再現は
+  yt-dlp で音声取得 → 各バックエンドで転写・`/usr/bin/time -l` 計測
+
+### モデル保存先（重要・2026-07-12変更）
+
+内蔵ストレージの空きが少ないため、**モデルは外付けSSD `/Volumes/SUNEAST_SE900SSD2T/Whispers` に保存する**。
+
+- transcribe.py のデフォルトは「`WHISPER_MODELS_DIR` 環境変数 > 外付けSSD（マウント時）> `./models`」の順で解決
+- openai-whisper の base.pt / tiny.pt、HFキャッシュ（mlx / faster-whisper のモデル）はすべて移動済み
+- HFキャッシュを使うバックエンドを実装する際は `HF_HUB_CACHE` をこのパス配下に向けること
 
 ### ② yt-dlp 統合
 

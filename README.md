@@ -87,7 +87,7 @@ the suffix (e.g. `audio.txt`) so the result is never lost.
 | `--en2jp` | Translate English → Japanese | — |
 | `--jp2en` | Translate Japanese → English | — |
 | `--allow-unsafe-model` | Skip memory safety check and force the requested model | — |
-| `--models-dir` | Directory to save Whisper models | `./models` |
+| `--models-dir` | Directory to save Whisper models | `WHISPER_MODELS_DIR` env var, or `./models` |
 | `--skip-update` | Skip checking for model updates if file exists | — |
 
 ## Model Memory Requirements

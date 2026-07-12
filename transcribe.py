@@ -7,6 +7,7 @@ import platform
 import socket
 import hashlib
 from whisper.utils import get_writer
+from whisper.tokenizer import LANGUAGES
 from deep_translator import GoogleTranslator
 
 # tqdmがインストールされているか確認し、なければダミーを作成
@@ -33,6 +34,8 @@ MODEL_MEMORY_REQUIREMENTS_GB = {
 }
 
 MODEL_ORDER = ["tiny", "base", "small", "medium", "turbo", "large"]
+
+AUDIO_EXTENSIONS = {".mp3", ".mp4", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".webm", ".aac", ".wma", ".aiff"}
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 
@@ -78,7 +81,7 @@ def ensure_model_exists(model_name, download_root, skip_update=False):
     # URLからハッシュを抽出（例: https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c002f23d4706596350711913917d23d922c07621453b342416f06a1/tiny.pt）
     expected_sha256 = url.split("/")[-2] if "/" in url else None
 
-    file_path = os.path.join(download_root, f"{model_name}.pt")
+    file_path = os.path.join(download_root, os.path.basename(url))
 
     exists = os.path.exists(file_path)
 
@@ -249,29 +252,31 @@ def translate_segments(result, target_lang="ja"):
 
     return result
 
-def transcribe_audio(
-    file_path,
-    mode="none",
+
+def detect_audio_language(model, file_path):
+    """音声の冒頭から言語を検出し、言語コードと表示名を返します。"""
+    audio = whisper.load_audio(file_path)
+    audio = whisper.pad_or_trim(audio)
+    mel = whisper.log_mel_spectrogram(
+        audio,
+        n_mels=model.dims.n_mels,
+    ).to(model.device)
+    _, probabilities = model.detect_language(mel)
+    language_code = max(probabilities, key=probabilities.get)
+    language_name = LANGUAGES.get(language_code, language_code).title()
+    return language_code, language_name
+
+
+def load_model(
     model_name="base",
-    translation_mode=None,
-    output_format="txt",
     allow_unsafe_model=False,
     models_dir=None,
     skip_update=False,
+    mode="none",
 ):
-    """
-    音声ファイルを読み込み、文字起こしを実行して結果をファイルに保存します。
-    """
-    if not os.path.exists(file_path):
-        print(f"Error: File '{file_path}' not found.")
-        return
-
-    start_time = time.time()
-
-    # モデル保存先を確定
+    """モデルをロードして返します。フォルダ処理時に使い回せます。"""
     actual_models_dir = models_dir or MODELS_DIR
 
-    # メモリチェック（ダウングレードの可能性があるため先に計算）
     safe_model_name, memory_info, safety_message = choose_safe_model(
         model_name,
         allow_unsafe_model=allow_unsafe_model,
@@ -290,33 +295,85 @@ def transcribe_audio(
     if safe_model_name is None:
         print("Aborted before model load to avoid system instability.")
         print("Use a smaller --model or pass --allow-unsafe-model to override.")
-        return
+        return None, None
 
-    # モデルの存在確認とダウンロード/更新
     try:
-        model_path = ensure_model_exists(
-            safe_model_name, 
-            actual_models_dir, 
-            skip_update=skip_update
-        )
+        ensure_model_exists(safe_model_name, actual_models_dir, skip_update=skip_update)
     except RuntimeError as e:
         print(f"Error: {e}")
-        return
+        return None, None
 
-    # 1. モデルのロード
     if mode != "none":
         print(f"Loading Whisper model '{safe_model_name}' from {actual_models_dir}...")
     model = whisper.load_model(safe_model_name, download_root=actual_models_dir)
+    return model, safe_model_name
+
+
+def transcribe_audio(
+    file_path,
+    mode="none",
+    model_name="base",
+    translation_mode=None,
+    output_format="txt",
+    allow_unsafe_model=False,
+    models_dir=None,
+    skip_update=False,
+    model=None,
+    item_index=1,
+    item_total=1,
+):
+    """
+    音声ファイルを読み込み、文字起こしを実行して結果をファイルに保存します。
+    model を渡すとモデルロードをスキップします（フォルダ処理時の使い回し用）。
+    """
+    if not os.path.exists(file_path):
+        print(f"Error: File '{file_path}' not found.")
+        return
+
+    start_time = time.time()
+
+    actual_models_dir = models_dir or MODELS_DIR
+
+    if model is None:
+        model, safe_model_name = load_model(
+            model_name=model_name,
+            allow_unsafe_model=allow_unsafe_model,
+            models_dir=actual_models_dir,
+            skip_update=skip_update,
+            mode=mode,
+        )
+        if model is None:
+            return
+    else:
+        safe_model_name = model_name
 
     # 2. 文字起こし/翻訳の設定
     # jp2en は Whisper の translate タスクを使用
     task = "translate" if translation_mode == "jp2en" else "transcribe"
-    
+
+    language_code = None
+    if mode in ("bar", "full"):
+        language_code, language_name = detect_audio_language(model, file_path)
+        print(f"Detected language: {language_name}", flush=True)
+        print(
+            f"[{item_index}/{item_total}] {os.path.basename(file_path)}",
+            flush=True,
+        )
+
     if mode == "bar":
-        print(f"Processing: {file_path} (Mode: {translation_mode or 'normal'})")
-        pbar = tqdm(total=100, desc="Progress", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {percentage:3.0f}%")
+        pbar = tqdm(
+            total=100,
+            bar_format="{percentage:3.0f}%|{bar}| "
+            "{n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+        )
         pbar.update(10)
-        result = model.transcribe(file_path, fp16=False, verbose=False, task=task)
+        result = model.transcribe(
+            file_path,
+            fp16=False,
+            verbose=False,
+            task=task,
+            language=language_code,
+        )
         pbar.update(70)
         
         # en2jp の場合は追加で翻訳処理
@@ -328,7 +385,13 @@ def transcribe_audio(
         pbar.close()
     else:
         verbose = (mode == "full")
-        result = model.transcribe(file_path, fp16=False, verbose=verbose, task=task)
+        result = model.transcribe(
+            file_path,
+            fp16=False,
+            verbose=verbose,
+            task=task,
+            language=language_code,
+        )
         
         if translation_mode == "en2jp":
             if mode != "none": print("Translating English to Japanese...")
@@ -381,11 +444,10 @@ if __name__ == "__main__":
     parser.add_argument("--models-dir", help=f"Directory to save Whisper models (default: {MODELS_DIR})")
     parser.add_argument("--skip-update", action="store_true", help="Skip checking for model updates if the file exists")
     
-    parser.set_defaults(mode="none", t_mode=None)
+    parser.set_defaults(mode="bar", t_mode=None)
     args = parser.parse_args()
 
-    transcribe_audio(
-        args.file,
+    common_kwargs = dict(
         mode=args.mode,
         model_name=args.model,
         translation_mode=args.t_mode,
@@ -394,3 +456,35 @@ if __name__ == "__main__":
         models_dir=args.models_dir,
         skip_update=args.skip_update,
     )
+
+    if os.path.isdir(args.file):
+        audio_files = sorted(
+            p for p in (
+                os.path.join(args.file, f) for f in os.listdir(args.file)
+            )
+            if os.path.isfile(p) and os.path.splitext(p)[1].lower() in AUDIO_EXTENSIONS
+        )
+
+        if not audio_files:
+            print(f"No audio files found in '{args.file}'.")
+        else:
+            print(f"Found {len(audio_files)} audio file(s) in '{args.file}'.")
+            shared_model, safe_name = load_model(
+                model_name=args.model,
+                allow_unsafe_model=args.allow_unsafe_model,
+                models_dir=args.models_dir,
+                skip_update=args.skip_update,
+                mode=args.mode,
+            )
+            if shared_model is None:
+                exit(1)
+            for i, audio_file in enumerate(audio_files, 1):
+                transcribe_audio(
+                    audio_file,
+                    model=shared_model,
+                    item_index=i,
+                    item_total=len(audio_files),
+                    **common_kwargs,
+                )
+    else:
+        transcribe_audio(args.file, item_index=1, item_total=1, **common_kwargs)

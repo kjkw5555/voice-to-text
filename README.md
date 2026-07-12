@@ -33,10 +33,10 @@ python transcribe.py <audio_file> [options]
 ### Basic examples
 
 ```bash
-# Default (base model, no progress output, txt format)
+# Default (base model, progress bar, txt format)
 python transcribe.py audio.m4a
 
-# Show progress bar
+# Explicitly show progress bar
 python transcribe.py audio.m4a --bar
 
 # Show verbose log
@@ -65,8 +65,8 @@ The translation mode is appended to the output filename (e.g. `audio_en2jp.txt`)
 | `--model` | Whisper model (`tiny` / `base` / `small` / `medium` / `large` / `turbo`) | `base` |
 | `--format` | Output format (`txt` / `srt` / `vtt` / `tsv` / `json`) | `txt` |
 | `--full` | Show verbose log | — |
-| `--bar` | Show progress bar | — |
-| `--none` | Suppress all output | ✓ |
+| `--bar` | Show progress bar | ✓ |
+| `--none` | Suppress all output | — |
 | `--en2jp` | Translate English → Japanese | — |
 | `--jp2en` | Translate Japanese → English | — |
 | `--allow-unsafe-model` | Skip memory safety check and force the requested model | — |

@@ -33,10 +33,10 @@ python transcribe.py <音声ファイル> [オプション]
 ### 基本的な例
 
 ```bash
-# デフォルト設定（base モデル、進捗なし、txt 出力）
+# デフォルト設定（base モデル、プログレスバー表示、txt 出力）
 python transcribe.py audio.m4a
 
-# プログレスバーを表示
+# プログレスバーを明示的に指定
 python transcribe.py audio.m4a --bar
 
 # 詳細ログを表示
@@ -65,8 +65,8 @@ python transcribe.py audio.m4a --jp2en
 | `--model` | Whisper モデル (`tiny` / `base` / `small` / `medium` / `large` / `turbo`) | `base` |
 | `--format` | 出力形式 (`txt` / `srt` / `vtt` / `tsv` / `json`) | `txt` |
 | `--full` | 詳細ログを表示 | — |
-| `--bar` | プログレスバーを表示 | — |
-| `--none` | すべての出力を抑制 | ✓ |
+| `--bar` | プログレスバーを表示 | ✓ |
+| `--none` | すべての出力を抑制 | — |
 | `--en2jp` | 英語 → 日本語翻訳を実行 | — |
 | `--jp2en` | 日本語 → 英語翻訳を実行 | — |
 | `--allow-unsafe-model` | メモリ安全チェックをスキップし、指定モデルを強制使用 | — |

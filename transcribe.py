@@ -223,13 +223,22 @@ def get_audio_duration(file_path):
     except:
         return 0
 
-def translate_text(text, target_lang="ja"):
+def translate_text(text, target_lang="ja", max_retries=3, retry_wait_seconds=2):
     """テキストを翻訳します（長文対応のため分割して処理）"""
     translator = GoogleTranslator(source='auto', target=target_lang)
     # GoogleTranslator は一度に5000文字までなので、必要に応じて分割
     max_chars = 4500
     chunks = [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
-    translated_chunks = [translator.translate(chunk) for chunk in chunks]
+    translated_chunks = []
+    for chunk in chunks:
+        for attempt in range(max_retries):
+            try:
+                translated_chunks.append(translator.translate(chunk))
+                break
+            except Exception:
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(retry_wait_seconds * (attempt + 1))
     return "".join(translated_chunks)
 
 
@@ -375,14 +384,6 @@ def transcribe_audio(
             language=language_code,
         )
         pbar.update(70)
-        
-        # en2jp の場合は追加で翻訳処理
-        if translation_mode == "en2jp":
-            print("\nTranslating to Japanese...")
-            result = translate_segments(result, target_lang="ja")
-        
-        pbar.update(20)
-        pbar.close()
     else:
         verbose = (mode == "full")
         result = model.transcribe(
@@ -392,17 +393,30 @@ def transcribe_audio(
             task=task,
             language=language_code,
         )
-        
-        if translation_mode == "en2jp":
-            if mode != "none": print("Translating English to Japanese...")
+
+    # en2jp の場合は追加で翻訳処理。
+    # 翻訳に失敗しても文字起こし結果は失わず、サフィックスなしで保存する。
+    applied_translation_mode = translation_mode
+    if translation_mode == "en2jp":
+        if mode != "none":
+            print("\nTranslating English to Japanese...", flush=True)
+        try:
             result = translate_segments(result, target_lang="ja")
+        except Exception as e:
+            applied_translation_mode = None
+            print(f"Warning: translation failed ({e}).")
+            print("Saving the original transcription without the '_en2jp' suffix.")
+
+    if mode == "bar":
+        pbar.update(20)
+        pbar.close()
 
     # 3. 結果の保存
     output_dir = os.path.dirname(file_path) or "."
     base_name = os.path.splitext(file_path)[0]
-    
+
     # ファイル名に翻訳モードを付与
-    suffix = f"_{translation_mode}" if translation_mode else ""
+    suffix = f"_{applied_translation_mode}" if applied_translation_mode else ""
     output_file_base = f"{base_name}{suffix}"
     
     # Whisperの標準writerを使用
@@ -478,13 +492,23 @@ if __name__ == "__main__":
             )
             if shared_model is None:
                 exit(1)
+            failed_files = []
             for i, audio_file in enumerate(audio_files, 1):
-                transcribe_audio(
-                    audio_file,
-                    model=shared_model,
-                    item_index=i,
-                    item_total=len(audio_files),
-                    **common_kwargs,
-                )
+                try:
+                    transcribe_audio(
+                        audio_file,
+                        model=shared_model,
+                        item_index=i,
+                        item_total=len(audio_files),
+                        **common_kwargs,
+                    )
+                except Exception as e:
+                    print(f"Error: failed to process '{audio_file}': {e}")
+                    failed_files.append(audio_file)
+            if failed_files:
+                print(f"\n{len(failed_files)} of {len(audio_files)} file(s) failed:")
+                for failed_file in failed_files:
+                    print(f"  - {failed_file}")
+                exit(1)
     else:
         transcribe_audio(args.file, item_index=1, item_total=1, **common_kwargs)

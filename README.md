@@ -7,6 +7,7 @@ Audio transcription tool powered by OpenAI Whisper, with English ↔ Japanese tr
 ## Features
 
 - Audio transcription via Whisper
+- Batch processing of a whole folder (model is loaded only once)
 - English → Japanese translation (Google Translate)
 - Japanese → English translation (Whisper translate task)
 - Multiple output formats: `txt` / `srt` / `vtt` / `tsv` / `json`
@@ -21,13 +22,13 @@ Audio transcription tool powered by OpenAI Whisper, with English ↔ Japanese tr
 ## Installation
 
 ```bash
-pip install openai-whisper deep-translator tqdm psutil
+pip install -r requirements.txt
 ```
 
 ## Usage
 
 ```bash
-python transcribe.py <audio_file> [options]
+python transcribe.py <audio_file_or_folder> [options]
 ```
 
 ### Basic examples
@@ -46,6 +47,18 @@ python transcribe.py audio.m4a --full
 python transcribe.py audio.m4a --model large --format srt
 ```
 
+### Batch processing a folder
+
+Pass a folder to process all audio files inside it.
+
+```bash
+python transcribe.py ./recordings --model small
+```
+
+- The model is loaded once and reused for every file.
+- If one file fails, the remaining files are still processed; failed
+  files are listed at the end (exit code 1 if there were failures).
+
 ### Translation
 
 ```bash
@@ -57,6 +70,10 @@ python transcribe.py audio.m4a --jp2en
 ```
 
 The translation mode is appended to the output filename (e.g. `audio_en2jp.txt`).
+
+`--en2jp` translation automatically retries transient network errors.
+If translation still fails, the original transcription is saved without
+the suffix (e.g. `audio.txt`) so the result is never lost.
 
 ## Options
 
@@ -96,6 +113,7 @@ Output is saved in the same directory as the input file.
 | Transcription only | `<input_name>.txt` |
 | `--en2jp` | `<input_name>_en2jp.txt` |
 | `--jp2en` | `<input_name>_jp2en.txt` |
+| `--en2jp` with failed translation | `<input_name>.txt` (original text) |
 
 ## Dependencies
 
@@ -106,3 +124,9 @@ Output is saved in the same directory as the input file.
 | `tqdm` | Progress bar display | Optional |
 | `psutil` | Memory usage detection | Optional |
 | `ffmpeg` | Audio file decoding | ✅ (external) |
+
+## Development
+
+```bash
+pytest
+```

@@ -7,6 +7,7 @@ OpenAI Whisper を使った音声文字起こしツール。英語⇔日本語�
 ## 機能
 
 - 音声ファイルの文字起こし（Whisper）
+- フォルダ指定で複数ファイルを一括処理（モデルは1回だけロード）
 - 英語 → 日本語 翻訳（Google Translate）
 - 日本語 → 英語 翻訳（Whisper の translate タスク）
 - 出力フォーマット: `txt` / `srt` / `vtt` / `tsv` / `json`
@@ -21,13 +22,13 @@ OpenAI Whisper を使った音声文字起こしツール。英語⇔日本語�
 ## インストール
 
 ```bash
-pip install openai-whisper deep-translator tqdm psutil
+pip install -r requirements.txt
 ```
 
 ## 使い方
 
 ```bash
-python transcribe.py <音声ファイル> [オプション]
+python transcribe.py <音声ファイルまたはフォルダ> [オプション]
 ```
 
 ### 基本的な例
@@ -46,6 +47,18 @@ python transcribe.py audio.m4a --full
 python transcribe.py audio.m4a --model large --format srt
 ```
 
+### フォルダの一括処理
+
+フォルダを指定すると、中の音声ファイルをまとめて処理します。
+
+```bash
+python transcribe.py ./recordings --model small
+```
+
+- モデルは最初に1回だけロードされ、全ファイルで使い回されます。
+- 途中のファイルでエラーが発生しても処理は継続し、最後に失敗した
+  ファイルの一覧を表示します（失敗があった場合の終了コードは 1）。
+
 ### 翻訳を使う
 
 ```bash
@@ -57,6 +70,10 @@ python transcribe.py audio.m4a --jp2en
 ```
 
 出力ファイル名には翻訳モードのサフィックスが付きます（例: `audio_en2jp.txt`）。
+
+`--en2jp` の翻訳は一時的な通信エラーに対して自動でリトライします。
+それでも翻訳に失敗した場合は、文字起こし結果を失わないように
+原文のままサフィックスなし（例: `audio.txt`）で保存されます。
 
 ## オプション一覧
 
@@ -97,6 +114,7 @@ python transcribe.py audio.m4a --jp2en
 | 通常の文字起こし | `<元ファイル名>.txt` |
 | `--en2jp` 翻訳 | `<元ファイル名>_en2jp.txt` |
 | `--jp2en` 翻訳 | `<元ファイル名>_jp2en.txt` |
+| `--en2jp` で翻訳に失敗 | `<元ファイル名>.txt`（原文のまま保存） |
 
 ## 依存ライブラリ
 
@@ -107,3 +125,9 @@ python transcribe.py audio.m4a --jp2en
 | `tqdm` | プログレスバー表示 | オプション |
 | `psutil` | メモリ情報の取得 | オプション |
 | `ffmpeg` | 音声ファイルの読み込み | ✅（外部ツール） |
+
+## 開発
+
+```bash
+pytest
+```

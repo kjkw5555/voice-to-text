@@ -3,19 +3,7 @@ from unittest.mock import Mock, patch
 from transcribe import transcribe_audio
 
 
-class FakeProgressBar:
-    def __init__(self, *args, **kwargs):
-        self.updates = []
-
-    def update(self, value):
-        self.updates.append(value)
-
-    def close(self):
-        pass
-
-
 @patch("transcribe.get_writer")
-@patch("transcribe.tqdm", FakeProgressBar)
 @patch("transcribe.detect_audio_language", return_value=("en", "English"))
 @patch("os.path.exists", return_value=True)
 def test_bar_mode_shows_language_then_indexed_filename(
@@ -48,3 +36,25 @@ def test_bar_mode_shows_language_then_indexed_filename(
         task="transcribe",
         language="en",
     )
+
+
+@patch("transcribe.get_writer")
+@patch("os.path.exists", return_value=True)
+def test_none_mode_is_silent_and_passes_verbose_none(
+    mock_exists,
+    mock_get_writer,
+    capsys,
+):
+    """--none では標準出力に何も出さず、whisper にも verbose=None を渡すこと"""
+    model = Mock()
+    model.transcribe.return_value = {"text": "hello", "segments": []}
+    mock_get_writer.return_value = Mock()
+
+    transcribe_audio(
+        "/audio/interview.m4a",
+        mode="none",
+        model=model,
+    )
+
+    assert capsys.readouterr().out == ""
+    assert model.transcribe.call_args.kwargs["verbose"] is None

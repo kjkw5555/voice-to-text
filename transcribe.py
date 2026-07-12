@@ -10,15 +10,6 @@ from whisper.utils import get_writer
 from whisper.tokenizer import LANGUAGES
 from deep_translator import GoogleTranslator
 
-# tqdmがインストールされているか確認し、なければダミーを作成
-try:
-    from tqdm import tqdm
-except ImportError:
-    class tqdm:
-        def __init__(self, *args, **kwargs): pass
-        def update(self, *args, **kwargs): pass
-        def close(self, *args, **kwargs): pass
-
 try:
     import psutil
 except ImportError:
@@ -211,18 +202,6 @@ def choose_safe_model(requested_model, allow_unsafe_model=False):
         "and no smaller model meets the configured safety threshold."
     )
 
-def get_audio_duration(file_path):
-    """ffprobeを使用して音声の長さを取得します（秒単位）"""
-    try:
-        cmd = [
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", file_path
-        ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        return float(result.stdout.strip())
-    except:
-        return 0
-
 def translate_text(text, target_lang="ja", max_retries=3, retry_wait_seconds=2):
     """テキストを翻訳します（長文対応のため分割して処理）"""
     translator = GoogleTranslator(source='auto', target=target_lang)
@@ -307,14 +286,17 @@ def load_model(
         return None, None
 
     try:
-        ensure_model_exists(safe_model_name, actual_models_dir, skip_update=skip_update)
+        model_path = ensure_model_exists(safe_model_name, actual_models_dir, skip_update=skip_update)
     except RuntimeError as e:
         print(f"Error: {e}")
         return None, None
 
     if mode != "none":
         print(f"Loading Whisper model '{safe_model_name}' from {actual_models_dir}...")
-    model = whisper.load_model(safe_model_name, download_root=actual_models_dir)
+    # モデル名ではなくファイルパスで渡す。名前で渡すと whisper が毎回
+    # ファイル全体をメモリに読み込んで SHA256 を再検証するため
+    # （検証は ensure_model_exists 側で済んでいる）。
+    model = whisper.load_model(model_path)
     return model, safe_model_name
 
 
@@ -369,30 +351,15 @@ def transcribe_audio(
             flush=True,
         )
 
-    if mode == "bar":
-        pbar = tqdm(
-            total=100,
-            bar_format="{percentage:3.0f}%|{bar}| "
-            "{n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
-        )
-        pbar.update(10)
-        result = model.transcribe(
-            file_path,
-            fp16=False,
-            verbose=False,
-            task=task,
-            language=language_code,
-        )
-        pbar.update(70)
-    else:
-        verbose = (mode == "full")
-        result = model.transcribe(
-            file_path,
-            fp16=False,
-            verbose=verbose,
-            task=task,
-            language=language_code,
-        )
+    # whisper の verbose は None=無音 / False=内蔵プログレスバー / True=詳細ログ
+    verbose_by_mode = {"none": None, "bar": False, "full": True}
+    result = model.transcribe(
+        file_path,
+        fp16=False,
+        verbose=verbose_by_mode[mode],
+        task=task,
+        language=language_code,
+    )
 
     # en2jp の場合は追加で翻訳処理。
     # 翻訳に失敗しても文字起こし結果は失わず、サフィックスなしで保存する。
@@ -406,10 +373,6 @@ def transcribe_audio(
             applied_translation_mode = None
             print(f"Warning: translation failed ({e}).")
             print("Saving the original transcription without the '_en2jp' suffix.")
-
-    if mode == "bar":
-        pbar.update(20)
-        pbar.close()
 
     # 3. 結果の保存
     output_dir = os.path.dirname(file_path) or "."
@@ -432,21 +395,21 @@ def transcribe_audio(
     
     return final_path
 
-if __name__ == "__main__":
+def build_parser():
     parser = argparse.ArgumentParser(description="Whisper Transcription with En-Ja/Ja-En Translation")
-    parser.add_argument("file", help="Path to the audio file")
-    
+    parser.add_argument("file", help="Path to the audio file or a folder of audio files")
+
     # 進捗表示
     group_p = parser.add_mutually_exclusive_group()
     group_p.add_argument("--full", action="store_const", dest="mode", const="full", help="Full details")
     group_p.add_argument("--bar", action="store_const", dest="mode", const="bar", help="Progress bar")
     group_p.add_argument("--none", action="store_const", dest="mode", const="none", help="No output")
-    
+
     # 翻訳オプション
     group_t = parser.add_mutually_exclusive_group()
     group_t.add_argument("--en2jp", action="store_const", dest="t_mode", const="en2jp", help="English to Japanese")
     group_t.add_argument("--jp2en", action="store_const", dest="t_mode", const="jp2en", help="Japanese to English")
-    
+
     # その他
     parser.add_argument("--model", choices=["tiny", "base", "small", "medium", "large", "turbo"], default="base")
     parser.add_argument("--format", choices=["txt", "srt", "vtt", "tsv", "json"], default="txt")
@@ -457,9 +420,13 @@ if __name__ == "__main__":
     )
     parser.add_argument("--models-dir", help=f"Directory to save Whisper models (default: {MODELS_DIR})")
     parser.add_argument("--skip-update", action="store_true", help="Skip checking for model updates if the file exists")
-    
+
     parser.set_defaults(mode="bar", t_mode=None)
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     common_kwargs = dict(
         mode=args.mode,
@@ -481,34 +448,42 @@ if __name__ == "__main__":
 
         if not audio_files:
             print(f"No audio files found in '{args.file}'.")
-        else:
-            print(f"Found {len(audio_files)} audio file(s) in '{args.file}'.")
-            shared_model, safe_name = load_model(
-                model_name=args.model,
-                allow_unsafe_model=args.allow_unsafe_model,
-                models_dir=args.models_dir,
-                skip_update=args.skip_update,
-                mode=args.mode,
-            )
-            if shared_model is None:
-                exit(1)
-            failed_files = []
-            for i, audio_file in enumerate(audio_files, 1):
-                try:
-                    transcribe_audio(
-                        audio_file,
-                        model=shared_model,
-                        item_index=i,
-                        item_total=len(audio_files),
-                        **common_kwargs,
-                    )
-                except Exception as e:
-                    print(f"Error: failed to process '{audio_file}': {e}")
-                    failed_files.append(audio_file)
-            if failed_files:
-                print(f"\n{len(failed_files)} of {len(audio_files)} file(s) failed:")
-                for failed_file in failed_files:
-                    print(f"  - {failed_file}")
-                exit(1)
-    else:
-        transcribe_audio(args.file, item_index=1, item_total=1, **common_kwargs)
+            return 0
+
+        print(f"Found {len(audio_files)} audio file(s) in '{args.file}'.")
+        shared_model, _ = load_model(
+            model_name=args.model,
+            allow_unsafe_model=args.allow_unsafe_model,
+            models_dir=args.models_dir,
+            skip_update=args.skip_update,
+            mode=args.mode,
+        )
+        if shared_model is None:
+            return 1
+
+        failed_files = []
+        for i, audio_file in enumerate(audio_files, 1):
+            try:
+                transcribe_audio(
+                    audio_file,
+                    model=shared_model,
+                    item_index=i,
+                    item_total=len(audio_files),
+                    **common_kwargs,
+                )
+            except Exception as e:
+                print(f"Error: failed to process '{audio_file}': {e}")
+                failed_files.append(audio_file)
+        if failed_files:
+            print(f"\n{len(failed_files)} of {len(audio_files)} file(s) failed:")
+            for failed_file in failed_files:
+                print(f"  - {failed_file}")
+            return 1
+        return 0
+
+    transcribe_audio(args.file, item_index=1, item_total=1, **common_kwargs)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

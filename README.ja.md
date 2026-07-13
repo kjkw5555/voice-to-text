@@ -9,6 +9,7 @@ OpenAI Whisper を使った音声文字起こしツール。英語⇔日本語�
 - 音声ファイルの文字起こし（Whisper）
 - Apple Silicon GPU バックエンド（[mlx-whisper](https://pypi.org/project/mlx-whisper/)、インストール済みなら自動選択）
 - フォルダ指定で複数ファイルを一括処理（モデルは1回だけロード）
+- URL（YouTube等）を直接指定して転写（yt-dlp で音声トラックのみダウンロード）
 - 英語 → 日本語 翻訳（Google Translate）
 - 日本語 → 英語 翻訳（Whisper の translate タスク）
 - 出力フォーマット: `txt` / `srt` / `vtt` / `tsv` / `json`
@@ -29,7 +30,7 @@ pip install -r requirements.txt
 ## 使い方
 
 ```bash
-python transcribe.py <音声ファイルまたはフォルダ> [オプション]
+python transcribe.py <音声ファイル | フォルダ | URL> [オプション]
 ```
 
 ### 基本的な例
@@ -59,6 +60,18 @@ python transcribe.py ./recordings --model small
 - モデルは最初に1回だけロードされ、全ファイルで使い回されます。
 - 途中のファイルでエラーが発生しても処理は継続し、最後に失敗した
   ファイルの一覧を表示します（失敗があった場合の終了コードは 1）。
+
+### URL から転写する
+
+URL（YouTube等）を渡すと、ダウンロードと転写を一気に実行します。
+[yt-dlp](https://github.com/yt-dlp/yt-dlp)（`brew install yt-dlp`）が必要です。
+
+```bash
+python transcribe.py "https://www.youtube.com/watch?v=..." --model turbo --en2jp
+```
+
+ダウンロードするのは音声トラックのみです（映像は取得しません）。音声ファイルは
+動画タイトル名でカレントディレクトリに保存され、転写結果はその隣に出力されます。
 
 ### 翻訳を使う
 
@@ -128,6 +141,7 @@ python transcribe.py audio.m4a --jp2en
 | `psutil` | メモリ情報の取得 | オプション |
 | `mlx-whisper` | Apple Silicon GPU バックエンド（M系Macで最良の品質/速度） | オプション |
 | `ffmpeg` | 音声ファイルの読み込み | ✅（外部ツール） |
+| `yt-dlp` | URL入力（音声ダウンロード） | オプション（外部ツール） |
 
 上記のメモリ要件表は `openai` バックエンド（CPU）向けです。`mlx` バックエンドは
 fp16 の重みを unified memory に置くため必要メモリが大幅に少なく、`turbo` でも

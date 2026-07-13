@@ -2,6 +2,7 @@ import whisper
 import os
 import time
 import argparse
+import shutil
 import subprocess
 import platform
 import socket
@@ -122,6 +123,46 @@ def ensure_model_exists(model_name, download_root, skip_update=False):
         raise RuntimeError(f"Model '{model_name}' not found locally and no internet connection.")
 
     return file_path
+
+
+def is_url(target):
+    """引数が URL かどうかを返します。"""
+    return target.startswith(("http://", "https://"))
+
+
+def download_audio(url, output_dir=".", mode="bar"):
+    """
+    yt-dlp で URL から音声トラックのみをダウンロードし、保存先パスを返します。
+    音声単独ストリームがない場合は映像付きを取得して音声を抽出します。
+    """
+    if shutil.which("yt-dlp") is None:
+        raise RuntimeError(
+            "yt-dlp is required to transcribe URLs (install with: brew install yt-dlp)"
+        )
+
+    cmd = [
+        "yt-dlp",
+        "-f", "bestaudio[ext=m4a]/bestaudio/best",
+        "-x", "--audio-format", "m4a",
+        "--no-playlist",
+        "--no-simulate",
+        "--quiet",
+        # stdout には最終ファイルパスだけを出す（進捗は stderr）
+        "--print", "after_move:filepath",
+        "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
+        url,
+    ]
+    if mode != "none":
+        cmd.insert(1, "--progress")
+
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"yt-dlp failed with exit code {result.returncode}")
+
+    lines = [line for line in result.stdout.strip().splitlines() if line.strip()]
+    if not lines or not os.path.exists(lines[-1]):
+        raise RuntimeError("yt-dlp did not report a downloaded file path")
+    return lines[-1]
 
 
 def bytes_to_gb(value):
@@ -518,6 +559,18 @@ def build_parser():
 def main(argv=None):
     args = build_parser().parse_args(argv)
 
+    target = args.file
+    if is_url(target):
+        try:
+            if args.mode != "none":
+                print(f"Downloading audio from {target} ...", flush=True)
+            target = download_audio(target, mode=args.mode)
+            if args.mode != "none":
+                print(f"Downloaded: {target}")
+        except RuntimeError as e:
+            print(f"Error: {e}")
+            return 1
+
     common_kwargs = dict(
         mode=args.mode,
         model_name=args.model,
@@ -529,19 +582,19 @@ def main(argv=None):
         backend=args.backend,
     )
 
-    if os.path.isdir(args.file):
+    if os.path.isdir(target):
         audio_files = sorted(
             p for p in (
-                os.path.join(args.file, f) for f in os.listdir(args.file)
+                os.path.join(target, f) for f in os.listdir(target)
             )
             if os.path.isfile(p) and os.path.splitext(p)[1].lower() in AUDIO_EXTENSIONS
         )
 
         if not audio_files:
-            print(f"No audio files found in '{args.file}'.")
+            print(f"No audio files found in '{target}'.")
             return 0
 
-        print(f"Found {len(audio_files)} audio file(s) in '{args.file}'.")
+        print(f"Found {len(audio_files)} audio file(s) in '{target}'.")
         shared_model, _ = load_model(
             model_name=args.model,
             allow_unsafe_model=args.allow_unsafe_model,
@@ -573,7 +626,7 @@ def main(argv=None):
             return 1
         return 0
 
-    transcribe_audio(args.file, item_index=1, item_total=1, **common_kwargs)
+    transcribe_audio(target, item_index=1, item_total=1, **common_kwargs)
     return 0
 
 

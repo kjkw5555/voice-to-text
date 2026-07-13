@@ -67,9 +67,14 @@ gibberish だったのは、メモリガードによる tiny への降格か、�
 - openai-whisper の base.pt / tiny.pt、HFキャッシュ（mlx / faster-whisper のモデル）はすべて移動済み
 - HFキャッシュを使うバックエンドを実装する際は `HF_HUB_CACHE` をこのパス配下に向けること
 
-### ② yt-dlp 統合
+### ② yt-dlp 統合 → 実装済み（2026-07-13）
 
-URL を直接渡して DL→転写を1ステップに。ファイル名は動画タイトルから生成。
+URL（http/https）を渡すと `download_audio()` が yt-dlp で音声トラックのみを
+ダウンロードし（`bestaudio[ext=m4a]/bestaudio/best` + `-x`）、動画タイトル名で
+カレントディレクトリに保存してから既存の転写フローに乗せる。ローカルファイル・
+フォルダの入力は従来どおり。yt-dlp は外部コマンド（`shutil.which` で存在確認、
+なければ導入方法つきエラー）。stdout は `--print after_move:filepath` の
+ファイルパスのみ、進捗は stderr に出る設計。
 
 ### ③ 翻訳の LLM 化
 

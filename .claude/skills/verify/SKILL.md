@@ -28,6 +28,9 @@ python3 transcribe.py /tmp/verify --model tiny --skip-update --bar
 # uses a raw socket and ignores the proxy)
 https_proxy=http://127.0.0.1:9 python3 transcribe.py /tmp/verify/valid.aiff \
     --model tiny --en2jp --skip-update --bar
+
+# URL input (19-second video, downloads audio to CWD)
+python3 transcribe.py "https://www.youtube.com/watch?v=jNQXAC9IVRw" --model tiny --bar
 ```
 
 ## Gotchas

@@ -9,6 +9,7 @@ Audio transcription tool powered by OpenAI Whisper, with English ↔ Japanese tr
 - Audio transcription via Whisper
 - Apple Silicon GPU backend via [mlx-whisper](https://pypi.org/project/mlx-whisper/), auto-selected when installed
 - Batch processing of a whole folder (model is loaded only once)
+- Transcribe directly from a URL (YouTube etc.) — downloads the audio track only via yt-dlp
 - English → Japanese translation (Google Translate)
 - Japanese → English translation (Whisper translate task)
 - Multiple output formats: `txt` / `srt` / `vtt` / `tsv` / `json`
@@ -29,7 +30,7 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-python transcribe.py <audio_file_or_folder> [options]
+python transcribe.py <audio_file | folder | URL> [options]
 ```
 
 ### Basic examples
@@ -59,6 +60,19 @@ python transcribe.py ./recordings --model small
 - The model is loaded once and reused for every file.
 - If one file fails, the remaining files are still processed; failed
   files are listed at the end (exit code 1 if there were failures).
+
+### Transcribing from a URL
+
+Pass a URL (YouTube etc.) to download and transcribe in one step.
+Requires [yt-dlp](https://github.com/yt-dlp/yt-dlp) (`brew install yt-dlp`).
+
+```bash
+python transcribe.py "https://www.youtube.com/watch?v=..." --model turbo --en2jp
+```
+
+Only the audio track is downloaded (no video). The audio file is saved in
+the current directory, named after the video title, and the transcript is
+written next to it.
 
 ### Translation
 
@@ -127,6 +141,7 @@ Output is saved in the same directory as the input file.
 | `psutil` | Memory usage detection | Optional |
 | `mlx-whisper` | Apple Silicon GPU backend (best quality/speed on M-series Macs) | Optional |
 | `ffmpeg` | Audio file decoding | ✅ (external) |
+| `yt-dlp` | URL input (audio download) | Optional (external) |
 
 The memory requirement table above applies to the `openai` backend (CPU).
 The `mlx` backend keeps fp16 weights in unified memory and needs far less RAM

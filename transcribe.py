@@ -520,6 +520,17 @@ def transcribe_audio(
     
     return final_path
 
+
+def expected_output_path(file_path, translation_mode=None, output_format="txt"):
+    """
+    transcribe_audio が報告する出力パス（翻訳サフィックス込み）を返します。
+    --skip-existing の判定に使います。翻訳失敗時のサフィックスなしフォールバック
+    ファイルは「依頼された出力」ではないため対象にしません。
+    """
+    suffix = f"_{translation_mode}" if translation_mode else ""
+    return f"{os.path.splitext(file_path)[0]}{suffix}.{output_format}"
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description="Whisper Transcription with En-Ja/Ja-En Translation")
     parser.add_argument("file", help="Path to the audio file or a folder of audio files")
@@ -551,9 +562,23 @@ def build_parser():
     )
     parser.add_argument("--models-dir", help=f"Directory to save Whisper models (default: {MODELS_DIR})")
     parser.add_argument("--skip-update", action="store_true", help="Skip checking for model updates if the file exists")
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip inputs whose output file (for the given --format and translation) already exists",
+    )
 
     parser.set_defaults(mode="bar", t_mode=None)
     return parser
+
+
+def is_output_existing(audio_file, args):
+    """--skip-existing 用: 出力済みなら旨を表示して True を返します。"""
+    output_path = expected_output_path(audio_file, args.t_mode, args.format)
+    if not os.path.exists(output_path):
+        return False
+    print(f"Skipping '{audio_file}': output already exists ('{output_path}').")
+    return True
 
 
 def main(argv=None):
@@ -595,6 +620,22 @@ def main(argv=None):
             return 0
 
         print(f"Found {len(audio_files)} audio file(s) in '{target}'.")
+
+        skipped_files = []
+        if args.skip_existing:
+            pending_files = []
+            for audio_file in audio_files:
+                if is_output_existing(audio_file, args):
+                    skipped_files.append(audio_file)
+                else:
+                    pending_files.append(audio_file)
+            if skipped_files:
+                print(f"Skipped {len(skipped_files)} file(s) with existing output.")
+            audio_files = pending_files
+            # 全件スキップならモデルもロードしない
+            if not audio_files:
+                return 0
+
         shared_model, _ = load_model(
             model_name=args.model,
             allow_unsafe_model=args.allow_unsafe_model,
@@ -624,6 +665,9 @@ def main(argv=None):
             for failed_file in failed_files:
                 print(f"  - {failed_file}")
             return 1
+        return 0
+
+    if args.skip_existing and is_output_existing(target, args):
         return 0
 
     transcribe_audio(target, item_index=1, item_total=1, **common_kwargs)

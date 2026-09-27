@@ -60,6 +60,20 @@ python transcribe.py ./recordings --model small
 - The model is loaded once and reused for every file.
 - If one file fails, the remaining files are still processed; failed
   files are listed at the end (exit code 1 if there were failures).
+- With `--skip-existing`, files whose output already exists are skipped
+  (resume an interrupted batch). The check uses the output name for the
+  current `--format` and translation suffix (e.g. `talk_en2jp.txt`).
+  Skipped files are reported but not counted as failures, and the model
+  is not loaded at all if every file is skipped.
+
+```bash
+python transcribe.py ./recordings --en2jp --skip-existing
+```
+
+> Note: with `--en2jp`, the unsuffixed fallback file written when
+> translation fails (`talk.txt`) does not count as existing output, so
+> the file is retried. `--skip-existing` also works for single files and
+> URLs (for URLs the audio is still downloaded; only transcription is skipped).
 
 ### Transcribing from a URL
 
@@ -105,6 +119,7 @@ the suffix (e.g. `audio.txt`) so the result is never lost.
 | `--allow-unsafe-model` | Skip memory safety check and force the requested model | — |
 | `--models-dir` | Directory to save Whisper models | `WHISPER_MODELS_DIR` env var, or `./models` |
 | `--skip-update` | Skip checking for model updates if file exists | — |
+| `--skip-existing` | Skip inputs whose output file (for the given `--format` / translation) already exists | — |
 
 ## Model Memory Requirements
 
